@@ -1,32 +1,52 @@
-import json, math
+import json
+import math
 
-def l1(v1, v2):
-    return sum(abs(v1[k]-v2[k]) for k in v1)/2
+MOMENTA = ["breakfast", "lunch", "coffee", "apero", "dinner", "after"]
+BUCKETS = ["food", "hot", "soft", "beer", "wine", "spirits"]
 
-def score_against_patterns(sig, patterns_path):
-    with open(patterns_path) as f:
-        pats = json.load(f)
+def l1_on_keys(v1, v2, keys):
+    """
+    Distance L1 normalisée calculée sur une liste de clés canonique.
+    Les clés manquantes sont considérées à 0.
+    """
+    return sum(abs(v1.get(k, 0.0) - v2.get(k, 0.0)) for k in keys) / 2
+
+
+def score_against_patterns(signature, patterns_path):
+    with open(patterns_path, "r", encoding="utf-8") as f:
+        patterns = json.load(f)
+
+    if not patterns:
+        return {}
 
     scores = {}
-    for p in pats:
-        dt = l1(sig["revenue_by_momentum"], p["dimensions"]["revenue_by_momentum"])
+
+    for pattern in patterns:
+        # 1) Distance temporelle (répartition des ventes)
+        dt = l1_on_keys(
+            signature["revenue_by_momentum"],
+            pattern["dimensions"]["revenue_by_momentum"],
+            MOMENTA
+        )
+
+        # 2) Distance mix produit pondérée par l'importance du momentum
         dm = 0.0
-        for m, w in p["dimensions"]["revenue_by_momentum"].items():
-            # Mix outlet (sécurisé)
-            outlet_mix = sig["category_mix_by_momentum"].get(m, {})
+        for m in MOMENTA:
+            weight = pattern["dimensions"]["revenue_by_momentum"].get(m, 0.0)
 
-            # Mix pattern (référence)
-            pattern_mix = p["dimensions"]["category_mix_by_momentum"][m]
+            outlet_mix = signature["category_mix_by_momentum"].get(m, {})
+            pattern_mix = pattern["dimensions"]["category_mix_by_momentum"].get(m, {})
 
-            # Forcer toutes les clés (food, hot, soft, beer, wine, spirits)
-            outlet_mix_complete = {
-                k: outlet_mix.get(k, 0.0) for k in pattern_mix.keys()
-            }
+            dm += weight * l1_on_keys(outlet_mix, pattern_mix, BUCKETS)
 
-            dm += w * l1(outlet_mix_complete, pattern_mix)
+        # Distance globale
+        d_total = 0.6 * dt + 0.4 * dm
+        scores[pattern["pattern_id"]] = math.exp(-d_total)
 
-        d = 0.6*dt + 0.4*dm
-        scores[p["pattern_id"]] = math.exp(-d)
+    # Normalisation en probabilités
+    total_score = sum(scores.values())
+    if total_score == 0:
+        return {}
 
-    s = sum(scores.values()) or 1
-    return {k:v/s for k,v in scores.items()}
+    return {k: v / total_score for k, v in scores.items()}
+

@@ -12,37 +12,38 @@ def compute_outlet_signature(csv_path):
     total = 0.0
 
     for r in load_sales(csv_path):
-        b = get_bucket(r["cat0"], r["cat1"], r["cat2"])
-        if not b:
-            continue  # non classifié -> ignoré
+        bucket = get_bucket(r["cat0"], r["cat1"], r["cat2"])
+        if not bucket:
+            continue  # produit non classifié → ignoré
 
-        m = get_momentum(r["datetime"].hour)
-        rev = r["price"] * r["quantity"]
+        momentum = get_momentum(r["datetime"].hour)
+        revenue = r["price"] * r["quantity"]
 
-        total += rev
-        rev_m[m] += rev
-        rev_mb[m][b] += rev
+        total += revenue
+        rev_m[momentum] += revenue
+        rev_mb[momentum][bucket] += revenue
 
-    # signature canonique (TOUS les momenta, même si 0)
-    sig = {
+    # Signature canonique : TOUS les momenta et buckets présents
+    signature = {
         "revenue_by_momentum": {m: 0.0 for m in MOMENTA},
-        "category_mix_by_momentum": {m: {b: 0.0 for b in BUCKETS} for m in MOMENTA},
+        "category_mix_by_momentum": {
+            m: {b: 0.0 for b in BUCKETS} for m in MOMENTA
+        },
+        "total_classified_revenue": total
     }
 
     if total == 0:
-        # aucun CA classifié -> signature nulle
-        return sig
+        return signature
 
-    # Revenue share by momentum
+    # Part de CA par momentum
     for m in MOMENTA:
-        sig["revenue_by_momentum"][m] = rev_m[m] / total
+        signature["revenue_by_momentum"][m] = rev_m[m] / total
 
-    # Category mix within each momentum 
-    for m in MOMENTA:
-        denom = rev_m[m]
-        if denom > 0:
+        if rev_m[m] > 0:
             for b in BUCKETS:
-                sig["category_mix_by_momentum"][m][b] = rev_mb[m][b] / denom
+                signature["category_mix_by_momentum"][m][b] = (
+                    rev_mb[m][b] / rev_m[m]
+                )
 
-    return sig
+    return signature
 
