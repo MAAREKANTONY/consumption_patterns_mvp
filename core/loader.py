@@ -1,5 +1,6 @@
 import csv
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 def _to_float(x):
     if x is None:
@@ -23,46 +24,49 @@ def _pick(row, *names):
 
 def _parse_datetime(row):
     """
-    Supports either:
-      - datetime / purchase_datetime
-      - purchase_date + purchase_hour (hour int 0-23)
-      - purchase_date + purchase_time (HH:MM or HH:MM:SS)
+    Accepts:
+      - datetime in format 'YYYY-MM-DD HH:MM:SS UTC'
+      - ISO datetime
+      - purchase_date + purchase_hour
+    Converts everything to Europe/Paris time.
     """
-    dt_raw = _pick(row, "datetime", "purchase_datetime", "created_at")
+
+    dt_raw = _pick(row, "datetime", "purchase_datetime")
+
     if dt_raw:
         dt_raw = str(dt_raw).strip()
-        for fmt in (
-            None,  # fromisoformat
-        ):
-            try:
-                return datetime.fromisoformat(dt_raw)
-            except Exception:
-                pass
 
-    date_raw = _pick(row, "purchase_date", "date", "day")
-    if not date_raw:
-        return None
-    date_raw = str(date_raw).strip()
+        try:
+            # Format: 2025-04-18 11:48:00 UTC
+            if dt_raw.endswith(" UTC"):
+                dt_raw = dt_raw.replace(" UTC", "")
+                dt = datetime.fromisoformat(dt_raw)
+                dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+                return dt.astimezone(ZoneInfo("Europe/Paris"))
 
-    hour_raw = _pick(row, "purchase_hour", "hour")
-    time_raw = _pick(row, "purchase_time", "time")
+            # ISO with timezone
+            dt = datetime.fromisoformat(dt_raw)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+            return dt.astimezone(ZoneInfo("Europe/Paris"))
+
+        except Exception:
+            return None
+
+    # fallback legacy format
+    date_raw = _pick(row, "purchase_date")
+    hour_raw = _pick(row, "purchase_hour")
 
     try:
-        if hour_raw is not None and str(hour_raw).strip() != "":
-            h = int(float(str(hour_raw).strip().replace(",", ".")))
-            return datetime.fromisoformat(f"{date_raw} {h:02d}:00:00")
-
-        if time_raw:
-            t = str(time_raw).strip()
-            # accept HH:MM or HH:MM:SS
-            if len(t.split(":")) == 2:
-                t = t + ":00"
-            return datetime.fromisoformat(f"{date_raw} {t}")
-
-        # fallback: just date at midnight
-        return datetime.fromisoformat(f"{date_raw} 00:00:00")
+        if date_raw and hour_raw:
+            dt = datetime.fromisoformat(f"{date_raw} {int(hour_raw):02d}:00:00")
+            dt = dt.replace(tzinfo=ZoneInfo("Europe/Paris"))
+            return dt
     except Exception:
         return None
+
+    return None
+
 
 def load_sales(csv_path):
     """
